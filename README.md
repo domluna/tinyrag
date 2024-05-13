@@ -349,7 +349,7 @@ Now each vector comparison is taking ~11ns!
 
 However, we don't want just closest vector but the "k" closest ones, so let's set "k" to something more realistic:
 
-```
+```julia
 julia> @be k_closest(X1, q1, 20)
 Benchmark: 6 samples with 1 evaluation
 min    16.300 ms (2 allocs: 400 bytes)
@@ -420,4 +420,29 @@ max    968.583 μs (52 allocs: 9.875 KiB)
 ```
 
 Under 1ms!
+
+
+### `usearch`
+
+[usearch](https://unum-cloud.github.io/usearch/) looks to be state of the art for in-memory vector similarity searches.
+
+
+``python
+In [8]: from usearch.index import search, MetricKind, Matches, BatchMatches
+   ...: import numpy as np
+
+In [12]: X = np.random.randint(-128, 128, size=(10**6, 64), dtype=np.int8)
+
+In [13]: q = np.random.randint(-128, 128, 64, dtype=np.int8)
+
+In [14]: %timeit search(X, q, 1, MetricKind.Hamming, exact=True)
+62.4 ms ± 494 µs per loop (mean ± std. dev. of 7 runs, 10 loops each)
+
+In [15]: %timeit search(X, q, 1, MetricKind.Hamming, exact=True, threads=4)
+32.7 ms ± 1.7 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
+```
+
+The Julia implementation looks to be quite a bit faster.
+
+
 
