@@ -1,10 +1,10 @@
 # tiny binary rag
 
-I wanted to experiment in how fast I could do exact RAG lookups with a binary vector space.
+I wanted to experiment in how quickly precise RAG lookups could be performed with a binary vector space.
 
 Why binary?
 
-It turns out the accuracy is [very similar to a full 32-bit vector](https://huggingface.co/blog/embedding-quantization). But we save a lot in terms of server costs, and it makes in-memory retrieval more feasible
+It turns out the accuracy is [very similar to a full 32-bit vector](https://huggingface.co/blog/embedding-quantization). But we save a lot in terms of server costs, and it makes in-memory retrieval more feasible.
 
 A database that was once 1TB is now ~32GB, which can easily fit in RAM on a much cheaper setup.
 
@@ -30,11 +30,11 @@ And so this opens up the question:
 
 If our dataset is smaller than this, then we can just do the dumb thing in a very small amount of code and be completely fine.
 
-We might not need a fancy vector DB or the newest HSNW library (HSNW is approximate search anyway, we're doing exact).
+We might not need a fancy vector DB or the newest HSNW library (HNSW is approximate search anyway, we're doing exact).
 
 I'm doing this in Julia because:
 
-1. I like it.
+1. I like it. :-)
 2. It should be able to get comparable performance for this relative to C, C++ or Rust. So we're not missing out on potential gains.
 
 ```julia
@@ -59,11 +59,9 @@ Ok, let's begin!
 
 ## Implementation
 
-Each vector is going to be n bits, where n in the size of the embedding. This will vary depending on which embedder you use, there are several proprietary and open source variations. I'll be assuming we're using the mixedbread model:
+Each vector is going to be n bits, where n in the size of the embedding. This will vary depending on the embedder used, there are several proprietary and open source variations. I'll be assuming we're using the mixedbread model: `mixedbread-ai/mxbai-embed-large-v1`
 
-- mixedbread-ai/mxbai-embed-large-v1
-
-This model returns a 1024 element float32 vector. Binarization turns this into a 1024 bit vector, represented as a 128 element int8 vector, or 128 bytes. Furthermore, we can reduce this to [64 bytes](https://www.mixedbread.ai/blog/binary-mrl) and so that will be our final representation.
+This model returns a 1024 element float32 vector. Through binarization, this is converted into a 1024 bit vector, which is then represented as a 128 element int8 vector or 128 bytes. Additionally, this can be further reduced to [64 bytes](https://www.mixedbread.ai/blog/binary-mrl), which is our final representation.
 
 A 512 bit vector represented as 64 int8 or uint8 elements.
 
@@ -77,7 +75,7 @@ julia> x = rand(Int8, 64)
     ⋮
 ```
 
-Keep in mind the representation is a byte element but we're operating at the bit level.
+Keep in mind that although the representation is in bytes we're operating at the bit level.
 
 Comparing two bit vectors will require using the [Hamming distance](https://en.wikipedia.org/wiki/Hamming_distance#). Luckily the definition is very straightforward, each time a bit in the vectors doesn't match add 1 to the distance. So two bit vectors of length 512 that are entirely different will have a hamming distance of 512, and if they are the same a distance of 0.
 
@@ -104,7 +102,7 @@ julia> hamming_distance(bitstring(Int8(125)), bitstring(Int8(33))) # should be 4
 4
 ```
 
-Julia has a lovely benchmarking package called `Chairmarks`, which is really easy to use. Let's see how fast this implementation is.
+Julia has a lovely benchmarking package called `Chairmarks`. Let's see how fast this implementation is.
 
 ```julia
 
