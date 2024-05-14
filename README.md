@@ -10,17 +10,16 @@ A database that was once 1TB is now ~32GB, which can easily fit in RAM on a much
 
 Assuming each row is a 1024-dim float32 vector, that's 4096 bytes per row. or ~244 million rows.
 
-For some added context Wikipedia, which is arguably the largest publicly available data to RAG might only be around 3.4 million rows.
+For some added context Wikipedia, which is arguably the largest publicly available data to RAG might only be around 15 million rows.
 
 https://en.wikipedia.org/wiki/Wikipedia:Size_of_Wikipedia
 
 - 6,818,523 articles
-- average 668 words per article (4.5B billion words)
-- average English word is 5 characters, English text has a ratio of 4-5 characters per token
-- let’s just say each word is composed of 3 tokens on average, so this is 13.5B tokens
+- average 668 words per article (4.55B billion words)
+- According to OpenAI [750 words is roughly 1000 tokens](https://openai.com/api/pricing/). So let's say 6B tokens.
 - if we use the mixedbread model we can represent 512 tokens in a vector, assuming overlap let’s say 400 tokens new tokens in each vector with 112 being used for overlap
 
-~3,400,000 vectors
+6B / 400 = ~15,000,000 vectors
 
 Chances are internal RAGs are going to be significantly smaller than this.
 
@@ -244,7 +243,7 @@ It's good to know in a perfect environment, such as an isolated machine, you cou
 
 Let's say each comparison takes 50ns, then we can search over 20M rows in a second, or 80M rows if we used 4 cores.
 
-1M rows should take 12ms over 4 cores. And Wikipedia at 3.4M rows 42.5ms.
+1M rows should take 12ms over 4 cores. And Wikipedia at 15M rows 180ms.
 
 In practice it turns out it's faster than this:
 
@@ -432,24 +431,22 @@ max    3.295 ms (66 allocs: 30.406 KiB)
 
 Similar timings since we're using a heap to order the entries.
 
-Just for fun let's search over 3.4M rows (Wikipedia).
+Just for fun let's search over 15M rows (Wikipedia).
 
 ```julia
-julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(3.4 * 10^6)];
+julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(15 * 10^6)];
 
 julia> @be k_closest_parallel(X1, q1, 10)
-Benchmark: 8 samples with 1 evaluation
-min    11.086 ms (56 allocs: 5.375 KiB)
-median 12.665 ms (56 allocs: 5.375 KiB)
-mean   12.496 ms (56 allocs: 5.375 KiB)
-max    14.044 ms (56 allocs: 5.375 KiB)
+Benchmark: 3 samples with 1 evaluation
+       46.547 ms (56 allocs: 5.625 KiB)
+       46.563 ms (56 allocs: 5.625 KiB)
+       47.186 ms (56 allocs: 5.625 KiB)
 
 julia> @be k_closest_parallel(X1, q1, 50)
-Benchmark: 9 samples with 1 evaluation
-min    10.936 ms (66 allocs: 17.438 KiB)
-median 11.047 ms (66 allocs: 17.438 KiB)
-mean   11.522 ms (66 allocs: 17.438 KiB)
-max    13.412 ms (66 allocs: 17.438 KiB)
+Benchmark: 3 samples with 1 evaluation
+       46.547 ms (58 allocs: 14.062 KiB)
+       46.621 ms (58 allocs: 14.062 KiB)
+       46.624 ms (58 allocs: 14.062 KiB)
 ```
 
 And over 100,000 rows:
@@ -458,11 +455,11 @@ And over 100,000 rows:
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(10^5)];
 
 julia> @be k_closest_parallel(X1, q1, 30)
-Benchmark: 247 samples with 1 evaluation
-min    341.667 μs (64 allocs: 12.000 KiB)
-median 343.083 μs (64 allocs: 12.000 KiB)
-mean   373.162 μs (64 allocs: 12.000 KiB)
-max    665.417 μs (64 allocs: 12.000 KiB)
+Benchmark: 281 samples with 1 evaluation
+min    330.792 μs (56 allocs: 10.000 KiB)
+median 331.625 μs (56 allocs: 10.000 KiB)
+mean   340.101 μs (56 allocs: 10.000 KiB)
+max    729.500 μs (56 allocs: 10.000 KiB)
 ```
 
 Under 1ms!
