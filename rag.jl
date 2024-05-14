@@ -65,7 +65,7 @@ function insert!(heap::MaxHeap, value::Pair{Int,Int})
 end
 
 function makeheap!(heap::MaxHeap)
-    for i in div(heap.k, 2):-1:1
+    for i = div(heap.k, 2):-1:1
         heapify!(heap, i)
     end
 end
@@ -112,9 +112,8 @@ function k_closest_parallel(
     t = nthreads()
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn k_closest(view(db, r), query, k; startind=r[1])
+        Threads.@spawn k_closest(view(db, r), query, k; startind = r[1])
     end
     results = fetch.(tasks)
     sort!(vcat(results...), by = x -> x[1])[1:k]
 end
-
