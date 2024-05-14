@@ -1,8 +1,6 @@
 using Base.Threads
 
-BYTE = Union{Int8,UInt8}
-
-@inline function hamming_distance(x1::T, x2::T)::Int where {T<:BYTE}
+@inline function hamming_distance(x1::T, x2::T)::Int where {T<:Union{Int8,UInt8}}
     r = x1 ⊻ x2
     c = 0
     for i = 0:7
@@ -24,7 +22,7 @@ end
 @inline function hamming_distance(
     x1::AbstractArray{T},
     x2::AbstractArray{T},
-)::Int where {T<:BYTE}
+)::Int where {T<:Union{Int8,UInt8}}
     s = 0
     @inbounds @simd for i in eachindex(x1, x2)
         s += hamming_distance(x1[i], x2[i])
@@ -35,7 +33,7 @@ end
 @inline function hamming_distance1(
     x1::AbstractArray{T},
     x2::AbstractArray{T},
-)::Int where {T<:BYTE}
+)::Int where {T<:Union{Int8,UInt8}}
     s = 0
     for i = 1:length(x1)
         s += hamming_distance(x1[i], x2[i])
@@ -96,7 +94,7 @@ function k_closest(
     query::AbstractVector{T},
     k::Int;
     startind::Int = 1,
-) where {T<:BYTE,V<:AbstractVector{T}}
+) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
     heap = MaxHeap(k)
     @inbounds for i in eachindex(db)
         d = hamming_distance(db[i], query)
@@ -109,7 +107,7 @@ function k_closest_parallel(
     db::AbstractArray{V},
     query::AbstractVector{T},
     k::Int,
-) where {T<:BYTE,V<:AbstractVector{T}}
+) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
     n = length(db)
     t = nthreads()
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
