@@ -4,7 +4,7 @@ I wanted to experiment in how fast I could do exact RAG lookups with a binary ve
 
 Why binary?
 
-It turns out the performance is [very similar to a full 32-bit vector](https://huggingface.co/blog/embedding-quantization). But we save a lot in terms of server costs, and it makes in-memory retrieval more feasible
+It turns out the accuracy is [very similar to a full 32-bit vector](https://huggingface.co/blog/embedding-quantization). But we save a lot in terms of server costs, and it makes in-memory retrieval more feasible
 
 A database that was once 1TB is now ~32GB, which can easily fit in RAM on a much cheaper setup.
 
