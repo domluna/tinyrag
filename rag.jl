@@ -100,7 +100,7 @@ function k_closest(
         d = hamming_distance(db[i], query)
         insert!(heap, d => startind + i - 1)
     end
-    return sort!(heap.data, by = x -> x[1])
+    return heap.data
 end
 
 function k_closest_parallel(
