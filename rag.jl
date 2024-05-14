@@ -89,7 +89,7 @@ function heapify!(heap::MaxHeap, i::Int)
     end
 end
 
-function k_closest(
+function _k_closest(
     db::AbstractVector{V},
     query::AbstractVector{T},
     k::Int;
@@ -103,6 +103,16 @@ function k_closest(
     return heap.data
 end
 
+function k_closest(
+    db::AbstractVector{V},
+    query::AbstractVector{T},
+    k::Int;
+    startind::Int = 1,
+) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
+    data = _k_closest(db, query, k; startind=startind)
+    return sort!(data, by = x -> x[1])
+end
+
 function k_closest_parallel(
     db::AbstractArray{V},
     query::AbstractVector{T},
@@ -110,9 +120,12 @@ function k_closest_parallel(
 ) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
     n = length(db)
     t = nthreads()
+    if n < 10_000 || t == 1
+        return k_closest(db, query, k)
+    end
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn k_closest(view(db, r), query, k; startind = r[1])
+        Threads.@spawn _k_closest(view(db, r), query, k; startind=r[1])
     end
     results = fetch.(tasks)
     sort!(vcat(results...), by = x -> x[1])[1:k]

@@ -129,7 +129,7 @@ max    6.990 ns
 
 We're not going to get lower than this for an operation. The nanosecond is basically the atomic measurement unit for time when working with CPUs.
 
-However, this does not mean each operation has to take ~1ns. There are various optimizations that hardware can do such that [several operations are done each clock cycle](https://ppc.cs.aalto.fi/ch1/#:~:text=Hence%2C%20a%20modern%204%2Dcore,billion%20clock%20cycles%20per%20second). Each core of a CPU has a number of arithmetic units which are used to process elementary operations (addition, subtraction, xor, or, and, etc), the arithmetic units are fed by what is known as pipelining. The point is there is more than 1 arithmetic unit, so we can conceivably do several additons or bit operations in the same clock cycle as long as they do not depend on eachother. Let's rewrite `hamming_distance` using only elementary operations so that we might take advantage of this.
+However, this does not mean each operation has to take ~1ns. There are various optimizations that hardware can do such that [several operations are done each clock cycle](https://ppc.cs.aalto.fi/ch1/#:~:text=Hence%2C%20a%20modern%204%2Dcore,billion%20clock%20cycles%20per%20second). Each core of a CPU has a number of arithmetic units which are used to process elementary operations (addition, subtraction, xor, or, and, etc), the arithmetic units are fed by what is known as pipelining. The point is there is more than 1 arithmetic unit, so we can conceivably do several additons or bit operations in the same clock cycle as long as they do not depend on each other. Let's rewrite `hamming_distance` using only elementary operations so that we might take advantage of this.
 
 Let's consider comparing two bits:
 
@@ -139,6 +139,7 @@ Let's consider comparing two bits:
 * 1, 1 -> 0
 
 This is the XOR operation. We want to XOR all the bits and keep track of which ones are 1, and return the sum.
+
 In order to do this over all the bits we can shift the integer by the number of bits, for an 8-bit number we would perform the shift 7 times.
 
 Here's what this looks like:
@@ -190,7 +191,7 @@ mean   80.240 ns
 max    189.941 ns
 ```
 
-There are a few more things we can do do further optimize this loop, the compiler sometimes adds these automatically but we can manually annotate this be certain.
+There are a few more things we can do do further optimize this loop, the compiler sometimes does these automatically but we can manually annotate it to be certain.
 
 ```julia
 @inline function hamming_distance(x1::AbstractArray{T}, x2::AbstractArray{T})::Int where {T<:BYTE}
@@ -203,7 +204,7 @@ end
 ```
 
 - `@inbounds` removes any boundary checking.
-- `@simd` adds tells the compiler to use SIMD instructions if possible.
+- `@simd` tells the compiler to use SIMD instructions if possible.
 
 ```julia
 julia> @be hamming_distance(q1, q2)
@@ -214,7 +215,7 @@ mean   61.721 ns
 max    163.827 ns
 ```
 
-That's a decent improvement. Sometimes this benchmark is 20-30ns on a fresh REPL session. I think it depends current background usage and how well SIMD can be utilized at that time.
+That's a decent improvement. This benchmark is 20-30ns on a fresh REPL session. I think it depends current background usage and how well SIMD can be utilized at that time.
 
 
 ```julia
@@ -239,11 +240,11 @@ mean   26.595 ns
 max    62.473 ns
 ```
 
-Still, it's good to know in a perfect environment, such as an isolated machine, you could make really good use of the hardware.
+It's good to know in a perfect environment, such as an isolated machine, you could make really good use of the hardware.
 
-Let's say though each comparison takes 50ns, then we can search over 20M rows in a second, if we utilized 4 cores then 80M rows.
+Let's say each comparison takes 50ns, then we can search over 20M rows in a second, or 80M rows if we used 4 cores.
 
-1M rows should take 12ms over 4 cores. And Wikipedia at 3.4M ~42.5ms.
+1M rows should take 12ms over 4 cores. And Wikipedia at 3.4M rows 42.5ms.
 
 In practice it turns out it's faster than this:
 
@@ -296,35 +297,47 @@ function heapify!(heap::MaxHeap, i::Int)
     end
 end
 
-function k_closest(
+function _k_closest(
     db::AbstractVector{V},
     query::AbstractVector{T},
     k::Int;
     startind::Int = 1,
-) where {T<:BYTE,V<:AbstractVector{T}}
+) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
     heap = MaxHeap(k)
     @inbounds for i in eachindex(db)
         d = hamming_distance(db[i], query)
         insert!(heap, d => startind + i - 1)
     end
-    return sort!(heap.data, by = x -> x[1])
+    return heap.data
+end
+
+function k_closest(
+    db::AbstractVector{V},
+    query::AbstractVector{T},
+    k::Int;
+    startind::Int = 1,
+) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
+    data = _k_closest(db, query, k; startind=startind)
+    return sort!(data, by = x -> x[1])
 end
 
 function k_closest_parallel(
     db::AbstractArray{V},
     query::AbstractVector{T},
     k::Int,
-) where {T<:BYTE,V<:AbstractVector{T}}
+) where {T<:Union{Int8,UInt8},V<:AbstractVector{T}}
     n = length(db)
     t = nthreads()
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn k_closest(view(db, r), query, k; startind=r[1])
+        Threads.@spawn _k_closest(view(db, r), query, k; startind=r[1])
     end
     results = fetch.(tasks)
     sort!(vcat(results...), by = x -> x[1])[1:k]
 end
 ```
+
+The heap structure can be ignored, it's just a max heap with a maximum size. Each section of the database being searched has it's own heap and then sort and pick the top k results at the end.
 
 ## Benchmarks
 
@@ -357,9 +370,9 @@ mean   4.187 ms (54 allocs: 3.422 KiB)
 max    5.060 ms (54 allocs: 3.422 KiB)
 ```
 
-It seems each vector comparison is more like ~15ns rather than ~50ns.
+Each vector comparison is ~15ns rather than ~50ns.
 
-We can actually do even better though by using `StaticArrays`:
+But wait, There's more! We can do even better using `StaticArrays`:
 
 ```julia
 using StaticArrays
@@ -385,7 +398,7 @@ max    3.385 ms (54 allocs: 3.672 KiB)
 
 Now each vector comparison is taking ~11ns!
 
-However, we don't want just closest vector but the "k" closest ones, so let's set "k" to something more realistic:
+However, we don't want just closest vector, but the "k" closest ones, so let's set "k" to something more realistic:
 
 ```julia
 julia> @be k_closest(X1, q1, 20)
@@ -417,9 +430,9 @@ mean   3.206 ms (66 allocs: 30.406 KiB)
 max    3.295 ms (66 allocs: 30.406 KiB)
 ```
 
-Same timings since we're using a heap to order the entries.
+Similar timings since we're using a heap to order the entries.
 
-Just for fun let's search over 3.4M rows (Wikipedia)
+Just for fun let's search over 3.4M rows (Wikipedia).
 
 ```julia
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(3.4 * 10^6)];
@@ -477,9 +490,34 @@ In [15]: %timeit search(X, q, 1, MetricKind.Hamming, exact=True, threads=4)
 
 The Julia implementation is ~6x faster single threaded and ~10x faster when using 4 cores.
 
-Maybe there's a way to make usearch faster but I couldn't find anything else out, and in all fairness exact search is likely not the priority to get as fast a possible.
+Maybe there's a way to make `usearch` faster, and in all fairness exact search is likely not the priority to get as fast a possible.
+
+That being said this is around 100 lines of Julia code and we're not doing anything fancy. Even using StaticArrays onlygave around a 25-33% improvement, not anything mindblowing.
 
 ## Conclusion
 
-With ~100 lines of Julia code we're able to achieve state of the art results in exact search similarity search for bit vectors. I don't know about you but I think this is pretty damn awesome!
+With ~100 lines of Julia code we're able to achieve state of the art results in exact search similarity search for binary vector spaces.
+
+I don't know about you but I think this is pretty damn awesome!
+
+## Extra
+
+I realized I never answered the original question (my bad).
+
+"At what point is the dataset too big that exact brute search over binary vectors is not entirely feasible?"
+
+Well it depends, how many RPS do you need to handle? What is the upper limit on how long the query should take?
+
+Right now were at ~3ms for 1M rows. 10M rows would be ~30ms.
+
+```julia
+julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(20 * 10^6)];
+
+julia> @be k_closest_parallel(X1, q1, 100)
+Benchmark: 2 samples with 1 evaluation
+       62.155 ms (58 allocs: 23.906 KiB)
+       63.807 ms (58 allocs: 23.906 KiB)
+```
+
+Even at 20M rows this query is unlikely to be the bottleneck of the application. 20M rows would be 76GB of the original encoded data vectors: 1024 element 32-bit vector. That's a big dataset, do you have that dataset? Probably not.
 
