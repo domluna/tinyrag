@@ -43,30 +43,66 @@ end
     s
 end
 
+mutable struct MaxHeap
+    const data::Vector{Pair{Int,Int}}
+    current_idx::Int # add pairs until current_idx > length(data)
+    const k::Int
+
+    function MaxHeap(k::Int)
+        new(fill((typemax(Int) => -1), k), 1, k)
+    end
+end
+
+function insert!(heap::MaxHeap, value::Pair{Int,Int})
+    if heap.current_idx <= heap.k
+        heap.data[heap.current_idx] = value
+        heap.current_idx += 1
+        if heap.current_idx > heap.k
+            makeheap!(heap)
+        end
+    elseif value.first < heap.data[1].first
+        heap.data[1] = value
+        heapify!(heap, 1)
+    end
+end
+
+function makeheap!(heap::MaxHeap)
+    for i in div(heap.k, 2):-1:1
+        heapify!(heap, i)
+    end
+end
+
+function heapify!(heap::MaxHeap, i::Int)
+    left = 2 * i
+    right = 2 * i + 1
+    largest = i
+
+    if left <= length(heap.data) && heap.data[left].first > heap.data[largest].first
+        largest = left
+    end
+
+    if right <= length(heap.data) && heap.data[right].first > heap.data[largest].first
+        largest = right
+    end
+
+    if largest != i
+        heap.data[i], heap.data[largest] = heap.data[largest], heap.data[i]
+        heapify!(heap, largest)
+    end
+end
+
 function k_closest(
     db::AbstractVector{V},
     query::AbstractVector{T},
-    k::Int,
+    k::Int;
+    startind::Int = 1,
 ) where {T<:BYTE,V<:AbstractVector{T}}
-    results = Vector{Pair{Int,Int}}(undef, k)
-    m = typemax(Int)
-    fill!(results, (m => -1))
-
+    heap = MaxHeap(k)
     @inbounds for i in eachindex(db)
         d = hamming_distance(db[i], query)
-        for j = 1:k
-            if d < results[j][1]
-                old = results[j]
-                results[j] = d => i
-                for l = j+1:k-1
-                    old, results[l] = results[l], old
-                end
-                break
-            end
-        end
+        insert!(heap, d => startind + i - 1)
     end
-
-    return results
+    return sort!(heap.data, by = x -> x[1])
 end
 
 function k_closest_parallel(
@@ -78,17 +114,9 @@ function k_closest_parallel(
     t = nthreads()
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn k_closest(view(db, r), query, k)
+        Threads.@spawn k_closest(view(db, r), query, k; startind=r[1])
     end
     results = fetch.(tasks)
     sort!(vcat(results...), by = x -> x[1])[1:k]
 end
 
-
-# usearch 1_000_000
-# In [54]: %timeit binary_index.search(q, top_k)
-# 46.5 µs ± 405 ns per loop (mean ± std. dev. of 7 runs, 10,000 loops each)
-#
-# With exact=True in usearch, the Julia implementation is faster than usearch.
-#
-# Extra

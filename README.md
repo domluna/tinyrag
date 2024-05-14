@@ -57,6 +57,8 @@ Environment:
 
 Ok, let's begin!
 
+## Implementation
+
 Each vector is going to be n bits, where n in the size of the embedding. This will vary depending on which embedder you use, there are several proprietary and open source variations. I'll be assuming we're using the mixedbread model:
 
 - mixedbread-ai/mxbai-embed-large-v1
@@ -248,30 +250,66 @@ Let's say though each comparison takes 50ns, then we can search over 20M rows in
 In practice it turns out it's faster than this:
 
 ```julia
+mutable struct MaxHeap
+    const data::Vector{Pair{Int,Int}}
+    current_idx::Int # add pairs until current_idx > length(data)
+    const k::Int
+
+    function MaxHeap(k::Int)
+        new(fill((typemax(Int) => -1), k), 1, k)
+    end
+end
+
+function insert!(heap::MaxHeap, value::Pair{Int,Int})
+    if heap.current_idx <= heap.k
+        heap.data[heap.current_idx] = value
+        heap.current_idx += 1
+        if heap.current_idx > heap.k
+            makeheap!(heap)
+        end
+    elseif value.first < heap.data[1].first
+        heap.data[1] = value
+        heapify!(heap, 1)
+    end
+end
+
+function makeheap!(heap::MaxHeap)
+    for i in div(heap.k, 2):-1:1
+        heapify!(heap, i)
+    end
+end
+
+function heapify!(heap::MaxHeap, i::Int)
+    left = 2 * i
+    right = 2 * i + 1
+    largest = i
+
+    if left <= length(heap.data) && heap.data[left].first > heap.data[largest].first
+        largest = left
+    end
+
+    if right <= length(heap.data) && heap.data[right].first > heap.data[largest].first
+        largest = right
+    end
+
+    if largest != i
+        heap.data[i], heap.data[largest] = heap.data[largest], heap.data[i]
+        heapify!(heap, largest)
+    end
+end
+
 function k_closest(
     db::AbstractVector{V},
     query::AbstractVector{T},
-    k::Int,
+    k::Int;
+    startind::Int = 1,
 ) where {T<:BYTE,V<:AbstractVector{T}}
-    results = Vector{Pair{Int,Int}}(undef, k)
-    m = typemax(Int)
-    fill!(results, (m => -1))
-
+    heap = MaxHeap(k)
     @inbounds for i in eachindex(db)
         d = hamming_distance(db[i], query)
-        for j = 1:k
-            if d < results[j][1]
-                old = results[j]
-                results[j] = d => i
-                for l = j+1:k-1
-                    old, results[l] = results[l], old
-                end
-                break
-            end
-        end
+        insert!(heap, d => startind + i - 1)
     end
-
-    return results
+    return sort!(heap.data, by = x -> x[1])
 end
 
 function k_closest_parallel(
@@ -283,12 +321,14 @@ function k_closest_parallel(
     t = nthreads()
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn k_closest(view(db, r), query, k)
+        Threads.@spawn k_closest(view(db, r), query, k; startind=r[1])
     end
     results = fetch.(tasks)
     sort!(vcat(results...), by = x -> x[1])[1:k]
 end
 ```
+
+## Benchmarks
 
 1M rows benchmark:
 
@@ -298,25 +338,25 @@ julia> X1 = [rand(Int8, 64) for _ in 1:(10^6)];
 
 julia> k_closest(X1, q1, 1)
 1-element Vector{Pair{Int64, Int64}}:
- 204 => 144609
+ 200 => 770015
 
 julia> @be k_closest(X1, q1, 1)
 Benchmark: 7 samples with 1 evaluation
-min    14.025 ms (2 allocs: 80 bytes)
-median 14.538 ms (2 allocs: 80 bytes)
-mean   14.828 ms (2 allocs: 80 bytes)
-max    16.799 ms (2 allocs: 80 bytes)
+min    14.767 ms (3 allocs: 112 bytes)
+median 14.811 ms (3 allocs: 112 bytes)
+mean   15.209 ms (3 allocs: 112 bytes)
+max    16.196 ms (3 allocs: 112 bytes)
 
 julia> k_closest_parallel(X1, q1, 1)
 1-element Vector{Pair{Int64, Int64}}:
- 204 => 144609
+ 200 => 770015
 
 julia> @be k_closest_parallel(X1, q1, 1)
-Benchmark: 23 samples with 1 evaluation
-min    4.024 ms (50 allocs: 3.297 KiB)
-median 4.082 ms (50 allocs: 3.297 KiB)
-mean   4.361 ms (50 allocs: 3.297 KiB)
-max    5.338 ms (50 allocs: 3.297 KiB)
+Benchmark: 24 samples with 1 evaluation
+min    4.061 ms (54 allocs: 3.422 KiB)
+median 4.097 ms (54 allocs: 3.422 KiB)
+mean   4.187 ms (54 allocs: 3.422 KiB)
+max    5.060 ms (54 allocs: 3.422 KiB)
 ```
 
 It seems each vector comparison is more like ~15ns rather than ~50ns.
@@ -332,17 +372,17 @@ julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(10^6)];
 
 julia> @be k_closest(X1, q1, 1)
 Benchmark: 9 samples with 1 evaluation
-min    10.426 ms (2 allocs: 80 bytes)
-median 10.569 ms (2 allocs: 80 bytes)
-mean   11.249 ms (2 allocs: 80 bytes)
-max    14.098 ms (2 allocs: 80 bytes)
+min    11.551 ms (3 allocs: 112 bytes)
+median 11.555 ms (3 allocs: 112 bytes)
+mean   11.669 ms (3 allocs: 112 bytes)
+max    12.272 ms (3 allocs: 112 bytes)
 
 julia> @be k_closest_parallel(X1, q1, 1)
 Benchmark: 31 samples with 1 evaluation
-min    2.815 ms (50 allocs: 3.547 KiB)
-median 2.855 ms (50 allocs: 3.547 KiB)
-mean   3.120 ms (50 allocs: 3.547 KiB)
-max    5.084 ms (50 allocs: 3.547 KiB)
+min    3.132 ms (54 allocs: 3.672 KiB)
+median 3.136 ms (54 allocs: 3.672 KiB)
+mean   3.161 ms (54 allocs: 3.672 KiB)
+max    3.385 ms (54 allocs: 3.672 KiB)
 ```
 
 Now each vector comparison is taking ~11ns!
@@ -351,33 +391,35 @@ However, we don't want just closest vector but the "k" closest ones, so let's se
 
 ```julia
 julia> @be k_closest(X1, q1, 20)
-Benchmark: 6 samples with 1 evaluation
-min    16.300 ms (2 allocs: 400 bytes)
-median 16.404 ms (2 allocs: 400 bytes)
-mean   16.879 ms (2 allocs: 400 bytes)
-max    18.736 ms (2 allocs: 400 bytes)
+Benchmark: 8 samples with 1 evaluation
+min    11.559 ms (5 allocs: 832 bytes)
+median 11.759 ms (5 allocs: 832 bytes)
+mean   12.243 ms (5 allocs: 832 bytes)
+max    14.431 ms (5 allocs: 832 bytes)
 
 julia> @be k_closest_parallel(X1, q1, 20)
-Benchmark: 21 samples with 1 evaluation
-min    4.393 ms (52 allocs: 7.703 KiB)
-median 4.460 ms (52 allocs: 7.703 KiB)
-mean   4.795 ms (52 allocs: 7.703 KiB)
-max    6.494 ms (52 allocs: 7.703 KiB)
+Benchmark: 31 samples with 1 evaluation
+min    3.139 ms (64 allocs: 9.391 KiB)
+median 3.149 ms (64 allocs: 9.391 KiB)
+mean   3.165 ms (64 allocs: 9.391 KiB)
+max    3.228 ms (64 allocs: 9.391 KiB)
 
 julia> @be k_closest(X1, q1, 100)
-Benchmark: 2 samples with 1 evaluation
-       51.933 ms (2 allocs: 1.625 KiB)
-       52.034 ms (2 allocs: 1.625 KiB)
+Benchmark: 9 samples with 1 evaluation
+min    11.598 ms (5 allocs: 3.281 KiB)
+median 11.604 ms (5 allocs: 3.281 KiB)
+mean   11.644 ms (5 allocs: 3.281 KiB)
+max    11.831 ms (5 allocs: 3.281 KiB)
 
 julia> @be k_closest_parallel(X1, q1, 100)
-Benchmark: 9 samples with 1 evaluation
-min    11.622 ms (54 allocs: 23.781 KiB)
-median 11.685 ms (54 allocs: 23.781 KiB)
-mean   12.005 ms (54 allocs: 23.781 KiB)
-max    13.952 ms (54 allocs: 23.781 KiB)
+Benchmark: 31 samples with 1 evaluation
+min    3.174 ms (66 allocs: 30.406 KiB)
+median 3.190 ms (66 allocs: 30.406 KiB)
+mean   3.206 ms (66 allocs: 30.406 KiB)
+max    3.295 ms (66 allocs: 30.406 KiB)
 ```
 
-A parallel search over 4 cores is still ~12ms while returning the 100 closest vectors.
+Same timings since we're using a heap to order the entries.
 
 Just for fun let's search over 3.4M rows (Wikipedia)
 
@@ -386,24 +428,17 @@ julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(3.4 * 10^6)];
 
 julia> @be k_closest_parallel(X1, q1, 10)
 Benchmark: 8 samples with 1 evaluation
-min    12.012 ms (52 allocs: 5.500 KiB)
-median 12.115 ms (52 allocs: 5.500 KiB)
-mean   12.608 ms (52 allocs: 5.500 KiB)
-max    14.360 ms (52 allocs: 5.500 KiB)
+min    11.086 ms (56 allocs: 5.375 KiB)
+median 12.665 ms (56 allocs: 5.375 KiB)
+mean   12.496 ms (56 allocs: 5.375 KiB)
+max    14.044 ms (56 allocs: 5.375 KiB)
 
-julia> @be k_closest_parallel(X1, q1, 20)
-Benchmark: 7 samples with 1 evaluation
-min    14.932 ms (52 allocs: 7.703 KiB)
-median 15.068 ms (52 allocs: 7.703 KiB)
-mean   15.454 ms (52 allocs: 7.703 KiB)
-max    17.015 ms (52 allocs: 7.703 KiB)
-
-julia> @be k_closest_parallel(X1, q1, 30)
-Benchmark: 6 samples with 1 evaluation
-min    17.996 ms (52 allocs: 9.875 KiB)
-median 18.028 ms (52 allocs: 9.875 KiB)
-mean   18.402 ms (52 allocs: 9.875 KiB)
-max    19.497 ms (52 allocs: 9.875 KiB)
+julia> @be k_closest_parallel(X1, q1, 50)
+Benchmark: 9 samples with 1 evaluation
+min    10.936 ms (66 allocs: 17.438 KiB)
+median 11.047 ms (66 allocs: 17.438 KiB)
+mean   11.522 ms (66 allocs: 17.438 KiB)
+max    13.412 ms (66 allocs: 17.438 KiB)
 ```
 
 And over 100,000 rows:
@@ -412,23 +447,23 @@ And over 100,000 rows:
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(10^5)];
 
 julia> @be k_closest_parallel(X1, q1, 30)
-Benchmark: 154 samples with 1 evaluation
-min    542.916 μs (52 allocs: 9.875 KiB)
-median 554.500 μs (52 allocs: 9.875 KiB)
-mean   594.811 μs (52 allocs: 9.875 KiB)
-max    968.583 μs (52 allocs: 9.875 KiB)
+Benchmark: 247 samples with 1 evaluation
+min    341.667 μs (64 allocs: 12.000 KiB)
+median 343.083 μs (64 allocs: 12.000 KiB)
+mean   373.162 μs (64 allocs: 12.000 KiB)
+max    665.417 μs (64 allocs: 12.000 KiB)
 ```
 
 Under 1ms!
 
 
-### `usearch`
+## `usearch`
 
-[usearch](https://unum-cloud.github.io/usearch/) looks to be state of the art for in-memory vector similarity searches.
+[usearch](https://unum-cloud.github.io/usearch/) appears to be state of the art for in-memory vector similarity searches.
 
 
-``python
-In [8]: from usearch.index import search, MetricKind, Matches, BatchMatches
+```python
+In [8]: from usearch.index import search, MetricKind
    ...: import numpy as np
 
 In [12]: X = np.random.randint(-128, 128, size=(10**6, 64), dtype=np.int8)
@@ -442,7 +477,11 @@ In [15]: %timeit search(X, q, 1, MetricKind.Hamming, exact=True, threads=4)
 32.7 ms ± 1.7 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 ```
 
-The Julia implementation looks to be quite a bit faster.
+The Julia implementation is ~6x faster single threaded and ~10x faster when using 4 cores.
 
+Maybe there's a way to make usearch faster but I couldn't find anything else out, and in all fairness exact search is likely not the priority to get as fast a possible.
 
+## Conclusion
+
+With ~100 lines of Julia code we're able to achieve state of the art results in exact search similarity search for bit vectors. I don't know about you but I think this is pretty damn awesome!
 
