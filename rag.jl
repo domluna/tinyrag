@@ -1,5 +1,15 @@
 using Base.Threads
 
+@inline function hamming_distance(s1::AbstractString, s2::AbstractString)::Int
+    s = 0
+    for (c1, c2) in zip(s1, s2)
+        if c1 != c2
+            s += 1
+        end
+    end
+    s
+end
+
 @inline function hamming_distance(x1::T, x2::T)::Int where {T<:Union{Int8,UInt8}}
     r = x1 ⊻ x2
     c = 0
@@ -9,12 +19,13 @@ using Base.Threads
     return Int(c)
 end
 
-@inline function hamming_distance(s1::AbstractString, s2::AbstractString)::Int
+@inline function hamming_distance1(
+    x1::AbstractArray{T},
+    x2::AbstractArray{T},
+)::Int where {T<:Union{Int8,UInt8}}
     s = 0
-    for (c1, c2) in zip(s1, s2)
-        if c1 != c2
-            s += 1
-        end
+    for i in eachindex(x1, x2)
+        s += hamming_distance(x1[i], x2[i])
     end
     s
 end
@@ -30,16 +41,6 @@ end
     s
 end
 
-@inline function hamming_distance1(
-    x1::AbstractArray{T},
-    x2::AbstractArray{T},
-)::Int where {T<:Union{Int8,UInt8}}
-    s = 0
-    for i = 1:length(x1)
-        s += hamming_distance(x1[i], x2[i])
-    end
-    s
-end
 
 mutable struct MaxHeap
     const data::Vector{Pair{Int,Int}}

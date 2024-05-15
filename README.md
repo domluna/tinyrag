@@ -144,9 +144,7 @@ In order to do this over all the bits we can shift the integer by the number of 
 Here's what this looks like:
 
 ```julia
-BYTE = Union{Int8,UInt8}
-
-@inline function hamming_distance(x1::T, x2::T)::Int where {T<:BYTE}
+@inline function hamming_distance(x1::T, x2::T)::Int where {T<:Union{Int8,UInt8}}
     r = x1 ⊻ x2 # xor
     # how many xored bits are 1
     c = 0
@@ -170,7 +168,7 @@ This is huge improvement, almost as fast as doing an addition operation!
 Now we need to do this for an vector:
 
 ```julia
-@inline function hamming_distance1(x1::AbstractArray{T}, x2::AbstractArray{T})::Int where {T<:BYTE}
+@inline function hamming_distance1(x1::AbstractArray{T}, x2::AbstractArray{T})::Int where {T<:Union{Int8,UInt8}}
     s = 0
     for i in 1:length(x1)
         s += hamming_distance(x1[i], x2[i])
@@ -193,7 +191,7 @@ max    189.941 ns
 There are a few more things we can do do further optimize this loop, the compiler sometimes does these automatically but we can manually annotate it to be certain.
 
 ```julia
-@inline function hamming_distance(x1::AbstractArray{T}, x2::AbstractArray{T})::Int where {T<:BYTE}
+@inline function hamming_distance(x1::AbstractArray{T}, x2::AbstractArray{T})::Int where {T<:Union{Int8,UInt8}}
     s = 0
     @inbounds @simd for i in eachindex(x1, x2)
         s += hamming_distance(x1[i], x2[i])
