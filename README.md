@@ -1,5 +1,7 @@
 # tiny binary rag
 
+> Thanks for HN users `mik1998` and `borodi` who brought up the popcnt instruction and the count_ones function in Julia which carries this out, I've updated the timings and it's even faster now.
+
 I wanted to experiment in how quickly precise RAG lookups could be performed with a binary vector space.
 
 Why binary?
@@ -165,6 +167,25 @@ max    5.279 ns
 
 This is huge improvement, almost as fast as doing an addition operation!
 
+There's a builtin function in Julia `count_ones` lowers to a machine instruction popcnt that counts all the ones so we can just use that instead doing the shifts!
+
+```julia
+@inline function hamming_distance(x1::T, x2::T)::Int where {T<:Union{Int8,UInt8}}
+    return Int(count_ones(x1 ⊻ x2))
+end
+```
+
+Now it's the same as doing an addition operation!
+
+```julia
+julia> @be hamming_distance(Int8(33), Int8(125))
+Benchmark: 5800 samples with 13341 evaluations
+min    1.243 ns
+median 1.249 ns
+mean   1.251 ns
+max    3.760 ns
+```
+
 Now we need to do this for an vector:
 
 ```julia
@@ -179,7 +200,7 @@ end
 
 We expect this to take around 128ns (~2 * 64).
 
-```
+```julia
 julia> @be hamming_distance1(q1, q2)
 Benchmark: 4469 samples with 256 evaluations
 min    69.500 ns
@@ -212,7 +233,7 @@ mean   61.721 ns
 max    163.827 ns
 ```
 
-That's a decent improvement. This benchmark is 20-30ns on a fresh REPL session. I think it depends current background usage and how well SIMD can be utilized at that time.
+That's a decent improvement. This benchmark is < 20ns on a fresh REPL session. I think it depends current background usage and how well SIMD can be utilized at that time.
 
 
 ```julia
@@ -222,19 +243,12 @@ julia> q2 = rand(Int8, 64);
 
 julia> hamming_distance(q1, q2);
 
-julia> @be hamming_distance(q1, q2)
-Benchmark: 3546 samples with 1000 evaluations
-min    23.333 ns
-median 23.459 ns
-mean   24.461 ns
-max    59.542 ns
-
-julia> @be hamming_distance(q1, q2)
-Benchmark: 4653 samples with 749 evaluations
-min    23.308 ns
-median 25.088 ns
-mean   26.595 ns
-max    62.473 ns
+julia> @be hamming_distance1(q1, q2)
+Benchmark: 4381 samples with 1113 evaluations
+min    17.932 ns
+median 18.381 ns
+mean   19.253 ns
+max    54.956 ns
 ```
 
 It's good to know in a perfect environment, such as an isolated machine, you could make really good use of the hardware.
@@ -341,90 +355,89 @@ The heap structure can be ignored, it's just a max heap with a maximum size. Eac
 1M rows benchmark:
 
 ```julia
-
 julia> X1 = [rand(Int8, 64) for _ in 1:(10^6)];
 
 julia> k_closest(X1, q1, 1)
 1-element Vector{Pair{Int64, Int64}}:
- 200 => 770015
+ 202 => 76839
 
 julia> @be k_closest(X1, q1, 1)
-Benchmark: 7 samples with 1 evaluation
-min    14.767 ms (3 allocs: 112 bytes)
-median 14.811 ms (3 allocs: 112 bytes)
-mean   15.209 ms (3 allocs: 112 bytes)
-max    16.196 ms (3 allocs: 112 bytes)
+Benchmark: 17 samples with 1 evaluation
+min    5.571 ms (3 allocs: 112 bytes)
+median 5.618 ms (3 allocs: 112 bytes)
+mean   5.853 ms (3 allocs: 112 bytes)
+max    6.996 ms (3 allocs: 112 bytes)
 
 julia> k_closest_parallel(X1, q1, 1)
 1-element Vector{Pair{Int64, Int64}}:
- 200 => 770015
+ 202 => 76839
 
 julia> @be k_closest_parallel(X1, q1, 1)
-Benchmark: 24 samples with 1 evaluation
-min    4.061 ms (54 allocs: 3.422 KiB)
-median 4.097 ms (54 allocs: 3.422 KiB)
-mean   4.187 ms (54 allocs: 3.422 KiB)
-max    5.060 ms (54 allocs: 3.422 KiB)
+Benchmark: 32 samples with 1 evaluation
+min    3.022 ms (54 allocs: 3.672 KiB)
+median 3.070 ms (54 allocs: 3.672 KiB)
+mean   3.074 ms (54 allocs: 3.672 KiB)
+max    3.153 ms (54 allocs: 3.672 KiB)
 ```
 
-Each vector comparison is ~15ns rather than ~50ns.
+Each vector comparison is ~6ns rather than ~50ns.
 
 But wait, There's more! We can do even better using `StaticArrays`:
 
 ```julia
-using StaticArrays
+julia> using StaticArrays
 
 julia> q1 = SVector{64, Int8}(rand(Int8, 64));
 
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(10^6)];
 
 julia> @be k_closest(X1, q1, 1)
-Benchmark: 9 samples with 1 evaluation
-min    11.551 ms (3 allocs: 112 bytes)
-median 11.555 ms (3 allocs: 112 bytes)
-mean   11.669 ms (3 allocs: 112 bytes)
-max    12.272 ms (3 allocs: 112 bytes)
+Benchmark: 22 samples with 1 evaluation
+min    4.049 ms (3 allocs: 112 bytes)
+median 4.245 ms (3 allocs: 112 bytes)
+mean   4.453 ms (3 allocs: 112 bytes)
+max    6.010 ms (3 allocs: 112 bytes)
 
 julia> @be k_closest_parallel(X1, q1, 1)
-Benchmark: 31 samples with 1 evaluation
-min    3.132 ms (54 allocs: 3.672 KiB)
-median 3.136 ms (54 allocs: 3.672 KiB)
-mean   3.161 ms (54 allocs: 3.672 KiB)
-max    3.385 ms (54 allocs: 3.672 KiB)
+Benchmark: 86 samples with 1 evaluation
+min    1.120 ms (54 allocs: 3.672 KiB)
+median 1.133 ms (54 allocs: 3.672 KiB)
+mean   1.144 ms (54 allocs: 3.672 KiB)
+max    1.311 ms (54 allocs: 3.672 KiB)
 ```
 
-Now each vector comparison is taking ~11ns!
+Now each vector comparison is taking ~4ns! Also notice that the parallel implementation looks to be better utilizing the cores available, improvement the runtime by 4x, since we have 4 cores, instead of just 2x.
 
 However, we don't want just closest vector, but the "k" closest ones, so let's set "k" to something more realistic:
 
 ```julia
 julia> @be k_closest(X1, q1, 20)
-Benchmark: 8 samples with 1 evaluation
-min    11.559 ms (5 allocs: 832 bytes)
-median 11.759 ms (5 allocs: 832 bytes)
-mean   12.243 ms (5 allocs: 832 bytes)
-max    14.431 ms (5 allocs: 832 bytes)
+Benchmark: 22 samples with 1 evaluation
+min    4.033 ms (5 allocs: 832 bytes)
+median 4.267 ms (5 allocs: 832 bytes)
+mean   4.511 ms (5 allocs: 832 bytes)
+max    5.910 ms (5 allocs: 832 bytes)
 
 julia> @be k_closest_parallel(X1, q1, 20)
-Benchmark: 31 samples with 1 evaluation
-min    3.139 ms (64 allocs: 9.391 KiB)
-median 3.149 ms (64 allocs: 9.391 KiB)
-mean   3.165 ms (64 allocs: 9.391 KiB)
-max    3.228 ms (64 allocs: 9.391 KiB)
+Benchmark: 85 samples with 1 evaluation
+min    1.126 ms (56 allocs: 7.828 KiB)
+median 1.137 ms (56 allocs: 7.828 KiB)
+mean   1.142 ms (56 allocs: 7.828 KiB)
+max    1.194 ms (56 allocs: 7.828 KiB)
 
 julia> @be k_closest(X1, q1, 100)
-Benchmark: 9 samples with 1 evaluation
-min    11.598 ms (5 allocs: 3.281 KiB)
-median 11.604 ms (5 allocs: 3.281 KiB)
-mean   11.644 ms (5 allocs: 3.281 KiB)
-max    11.831 ms (5 allocs: 3.281 KiB)
+Benchmark: 23 samples with 1 evaluation
+min    4.108 ms (5 allocs: 3.281 KiB)
+median 4.270 ms (5 allocs: 3.281 KiB)
+mean   4.344 ms (5 allocs: 3.281 KiB)
+max    5.472 ms (5 allocs: 3.281 KiB)
 
 julia> @be k_closest_parallel(X1, q1, 100)
-Benchmark: 31 samples with 1 evaluation
-min    3.174 ms (66 allocs: 30.406 KiB)
-median 3.190 ms (66 allocs: 30.406 KiB)
-mean   3.206 ms (66 allocs: 30.406 KiB)
-max    3.295 ms (66 allocs: 30.406 KiB)
+Benchmark: 82 samples with 1 evaluation
+min    1.159 ms (58 allocs: 23.906 KiB)
+median 1.185 ms (58 allocs: 23.906 KiB)
+mean   1.201 ms (58 allocs: 23.906 KiB)
+max    1.384 ms (58 allocs: 23.906 KiB)
 ```
 
 Similar timings since we're using a heap to order the entries.
@@ -435,16 +448,18 @@ Just for fun let's search over 15M rows (Wikipedia).
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(15 * 10^6)];
 
 julia> @be k_closest_parallel(X1, q1, 10)
-Benchmark: 3 samples with 1 evaluation
-       46.547 ms (56 allocs: 5.625 KiB)
-       46.563 ms (56 allocs: 5.625 KiB)
-       47.186 ms (56 allocs: 5.625 KiB)
+Benchmark: 6 samples with 1 evaluation
+min    16.534 ms (56 allocs: 5.625 KiB)
+median 16.637 ms (56 allocs: 5.625 KiB)
+mean   16.628 ms (56 allocs: 5.625 KiB)
+max    16.762 ms (56 allocs: 5.625 KiB)
 
 julia> @be k_closest_parallel(X1, q1, 50)
-Benchmark: 3 samples with 1 evaluation
-       46.547 ms (58 allocs: 14.062 KiB)
-       46.621 ms (58 allocs: 14.062 KiB)
-       46.624 ms (58 allocs: 14.062 KiB)
+Benchmark: 6 samples with 1 evaluation
+min    16.506 ms (58 allocs: 14.062 KiB)
+median 16.672 ms (58 allocs: 14.062 KiB)
+mean   16.669 ms (58 allocs: 14.062 KiB)
+max    16.777 ms (58 allocs: 14.062 KiB)
 ```
 
 And over 100,000 rows:
@@ -453,11 +468,11 @@ And over 100,000 rows:
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(10^5)];
 
 julia> @be k_closest_parallel(X1, q1, 30)
-Benchmark: 281 samples with 1 evaluation
-min    330.792 μs (56 allocs: 10.000 KiB)
-median 331.625 μs (56 allocs: 10.000 KiB)
-mean   340.101 μs (56 allocs: 10.000 KiB)
-max    729.500 μs (56 allocs: 10.000 KiB)
+Benchmark: 679 samples with 1 evaluation
+min    120.250 μs (56 allocs: 10.000 KiB)
+median 131.792 μs (56 allocs: 10.000 KiB)
+mean   137.709 μs (56 allocs: 10.000 KiB)
+max    463.625 μs (56 allocs: 10.000 KiB)
 ```
 
 Under 1ms!
@@ -483,11 +498,11 @@ In [15]: %timeit search(X, q, 1, MetricKind.Hamming, exact=True, threads=4)
 32.7 ms ± 1.7 ms per loop (mean ± std. dev. of 7 runs, 10 loops each)
 ```
 
-The Julia implementation is ~6x faster single threaded and ~10x faster when using 4 cores.
+The Julia implementation is ~16x faster single threaded and ~30x faster when using 4 cores.
 
 Maybe there's a way to make `usearch` faster, and in all fairness exact search is likely not the priority to get as fast a possible.
 
-That being said this is around 100 lines of Julia code and we're not doing anything fancy. Even using StaticArrays onlygave around a 25-33% improvement, not anything mindblowing.
+That being said this is around 100 lines of Julia code and we're not doing anything fancy aside from arguably using StaticArrays.
 
 ## Conclusion
 
@@ -503,15 +518,17 @@ I realized I never answered the original question (my bad).
 
 Well it depends, how many RPS do you need to handle? What is the upper limit on how long the query should take?
 
-Right now were at ~3ms for 1M rows. 10M rows would be ~30ms.
+Right now were at ~1-1.3ms for 1M rows. 10M rows would be ~10-13ms.
 
 ```julia
 julia> X1 = [SVector{64, Int8}(rand(Int8, 64)) for _ in 1:(20 * 10^6)];
 
 julia> @be k_closest_parallel(X1, q1, 100)
-Benchmark: 2 samples with 1 evaluation
-       62.155 ms (58 allocs: 23.906 KiB)
-       63.807 ms (58 allocs: 23.906 KiB)
+Benchmark: 5 samples with 1 evaluation
+min    22.198 ms (58 allocs: 23.906 KiB)
+median 22.232 ms (58 allocs: 23.906 KiB)
+mean   22.247 ms (58 allocs: 23.906 KiB)
+max    22.330 ms (58 allocs: 23.906 KiB)
 ```
 
 Even at 20M rows this query is unlikely to be the bottleneck of the application. 20M rows would be 76GB of the original encoded data vectors: 1024 element 32-bit vector. That's a big dataset, do you have that dataset? Probably not.
