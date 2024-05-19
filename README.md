@@ -1,5 +1,9 @@
 # tiny binary rag
 
+> Whether you use Int8, UInt8, or Int64 the performance the same when performing the actual search (on my M1 air). This might change depending on the architecture you're using. The best representation is probably UInt64s. as this will likely give you the most transferrable result across different architectures.
+
+> The best search timings come from either 1) Vector of StaticArrays and StaticArray query vector or 2) Matrix of elements as (num_bytes, num_rows) and StaticArray query. So could only make the query array static and get the same performance.
+
 > Thanks for HN users `mik1998` and `borodi` who brought up the popcnt instruction and the count_ones function in Julia which carries this out, I've updated the timings and it's even faster now.
 
 I wanted to experiment in how quickly precise RAG lookups could be performed with a binary vector space.
