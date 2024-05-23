@@ -1,9 +1,9 @@
 include("heap.jl")
 
-mutable struct HNSW
-    const M::Int
-    const Mmax0::Int
-    const ef_construction::Int
+@kwdef mutable struct HNSW
+    const connectivity::Int
+    const connectivity0::Int
+    const expansion_factor::Int
     const mL::Float64
     const num_layers::Int
 
@@ -12,18 +12,19 @@ mutable struct HNSW
     graphs::Dict{Int,Dict{Int,Vector{Int}}}
     counts::Dict{Int,Int}
 
-    function HNSW(num_layers::Int, M=16, Mmax0=32, ef_construction=200)
+    function HNSW(num_layers::Int; connectivity=16, connectivity0=32, expansion_factor=128)
         graphs = Dict{Int,Dict{Int,Vector{Int}}}()
         for i = 1:num_layers
             d = Dict{Int,Vector{Int}}()
             d[1] = Int[]
             graphs[i] = d
         end
+        mL = 1 / log(connectivity)
         new(
-            M,
-            Mmax0,
-            ef_construction,
-            1 / log(M),
+            connectivity,
+            connectivity0,
+            expansion_factor,
+            mL,
             num_layers,
             1,
             Int[],
@@ -38,23 +39,21 @@ function _distance(x::Int, y::Int)::Int
 end
 
 function _get_level(hnsw::HNSW)::Int
-    v = min(floor(Int, (-log(rand()) * hnsw.mL) + 1), hnsw.num_layers)
-    if haskey(hnsw.counts, v)
-        hnsw.counts[v] += 1
+    l = min(floor(Int, (-log(rand()) * hnsw.mL) + 1), hnsw.num_layers)
+    if haskey(hnsw.counts, l)
+        hnsw.counts[l] += 1
     else
-        hnsw.counts[v] = 1
+        hnsw.counts[l] = 1
     end
-    return v
+    return l
 end
 
-function _search_layer(hnsw::HNSW, query::Int, ep::Int, ef::Int, lc::Int)::Vector{Int}
+function _search_layer(hnsw::HNSW, query::Int, ep::Int, expansion_factor::Int, level::Int)::Vector{Int}
     visited = Set{Int}([ep])
+    candidates = MinHeap(expansion_factor * 5)
+    W = MaxHeap(expansion_factor)
+
     d = _distance(query, hnsw.data[ep])
-
-    # this might need to be larger?
-    candidates = MinHeap(ef)
-    W = MaxHeap(ef)
-
     insert!(candidates, d => ep)
     insert!(W, d => ep)
 
@@ -66,13 +65,13 @@ function _search_layer(hnsw::HNSW, query::Int, ep::Int, ef::Int, lc::Int)::Vecto
             break
         end
 
-        for e in get(hnsw.graphs[lc], c, Int[])
+        for e in get(hnsw.graphs[level], c, Int[])
             if e ∉ visited
                 push!(visited, e)
                 d_e = _distance(query, hnsw.data[e])
                 d_f = W[1].first
 
-                if d_e < d_f || length(W) < ef
+                if d_e < d_f || length(W) < expansion_factor
                     # insert! will automatically remove the largest element if the heap is full
                     insert!(W, d_e => e)
                     insert!(candidates, d_e => e)
@@ -80,11 +79,11 @@ function _search_layer(hnsw::HNSW, query::Int, ep::Int, ef::Int, lc::Int)::Vecto
             end
         end
     end
-    mx = lc == 1 ? hnsw.Mmax0 : hnsw.M
+
+    mx = level == 1 ? hnsw.connectivity0 : hnsw.connectivity
     k = min(length(W), mx)
-    data = W.data
-    sort!(data, by=x -> x[1])[1:k]
-    return Int[data[i][2] for i = 1:k]
+    sort!(W.data, by=x -> x[1])
+    return Int[W.data[i][2] for i = 1:k]
 end
 
 function Base.insert!(hnsw::HNSW, q::Int)
@@ -93,41 +92,42 @@ function Base.insert!(hnsw::HNSW, q::Int)
     L = length(hnsw.graphs)
 
     if q_i == 1
-        for lc = L:-1:1
-            hnsw.graphs[lc][1] = Int[]
+        for level = L:-1:1
+            hnsw.graphs[level][1] = Int[]
         end
         return
     end
 
     ep = hnsw.enter_point
-    l = min(_get_level(hnsw), L)
-    for lc = L:-1:l+1
-        W = _search_layer(hnsw, q, ep, 1, lc)
+    l = _get_level(hnsw)
+
+    for level = L:-1:l+1
+        W = _search_layer(hnsw, q, ep, 1, level)
         ep = W[1]
     end
 
-    for lc = l:-1:1
-        W = _search_layer(hnsw, q, ep, hnsw.ef_construction, lc)
+    for level = l:-1:1
+        W = _search_layer(hnsw, q, ep, hnsw.expansion_factor, level)
         neighbors = W
 
         # bi-directional connection
-        hnsw.graphs[lc][q_i] = neighbors
+        hnsw.graphs[level][q_i] = neighbors
         for n in neighbors
-            if !haskey(hnsw.graphs[lc], n)
-                hnsw.graphs[lc][n] = Int[q_i]
+            if !haskey(hnsw.graphs[level], n)
+                hnsw.graphs[level][n] = Int[q_i]
             else
-                if q_i ∉ hnsw.graphs[lc][n]
-                    push!(hnsw.graphs[lc][n], q_i)
+                if q_i ∉ hnsw.graphs[level][n]
+                    push!(hnsw.graphs[level][n], q_i)
                 end
             end
         end
 
-        # shrink the neighbors
-        mx = lc == 1 ? hnsw.Mmax0 : hnsw.M
+        # shrink the neighbors if necessary
+        mx = level == 1 ? hnsw.connectivity0 : hnsw.connectivity
         for n in neighbors
-            if length(hnsw.graphs[lc][n]) > mx
-                hnsw.graphs[lc][n] = sort!(
-                    hnsw.graphs[lc][n],
+            if length(hnsw.graphs[level][n]) > mx
+                hnsw.graphs[level][n] = sort!(
+                    hnsw.graphs[level][n],
                     by=x -> _distance(hnsw.data[x], hnsw.data[n]),
                 )[1:mx]
             end
@@ -136,28 +136,27 @@ function Base.insert!(hnsw::HNSW, q::Int)
     end
 
     hnsw.enter_point = ep
+    return
 end
 
-function search(hnsw::HNSW, query::Int, k::Int, ef::Int=100)
+function search(hnsw::HNSW, query::Int, k::Int; expansion_search::Int=64)
     @info "Searching for $k neighbors" query
     ep = hnsw.enter_point
     L = length(hnsw.graphs)
-    for lc = L:-1:2
-        W = _search_layer(hnsw, query, ep, 1, lc)
+    for level = L:-1:2
+        W = _search_layer(hnsw, query, ep, 1, level)
         ep = W[1]
     end
-    W = _search_layer(hnsw, query, ep, ef, 1)
-    inds = W[1:k]
-    return (inds, [hnsw.data[n] for n in inds])
+    W = _search_layer(hnsw, query, ep, expansion_search, 1)[1:k]
+    return (W, [hnsw.data[n] for n in W])
 end
 
 function run0()::HNSW
-    hnsw = HNSW(10, 16, 32, 200)
+    hnsw = HNSW(10)
     for _ = 1:1000
         insert!(hnsw, rand(1:10_000))
     end
-    #
-    # # Perform a k-NN search
+
     query = rand(1:10_000)
     k = 5
     (inds, vals) = search(hnsw, query, k)
@@ -179,5 +178,6 @@ function run0()::HNSW
     for (k, v) in hnsw.counts
         println("Level $k: $v")
     end
+
     return hnsw
 end
