@@ -1,35 +1,21 @@
 include("heap.jl")
 
-@kwdef mutable struct HNSW
+mutable struct HNSW
     const connectivity::Int
-    const connectivity0::Int
-    const expansion_factor::Int
     const mL::Float64
-    const num_layers::Int
+
+    const graphs::Dict{Int,Dict{Int,Vector{Int}}}
 
     enter_point::Int
     data::Vector{Int}
-    graphs::Dict{Int,Dict{Int,Vector{Int}}}
-    counts::Dict{Int,Int}
 
-    function HNSW(num_layers::Int; connectivity=16, connectivity0=32, expansion_factor=128)
-        graphs = Dict{Int,Dict{Int,Vector{Int}}}()
-        for i = 1:num_layers
-            d = Dict{Int,Vector{Int}}()
-            d[1] = Int[]
-            graphs[i] = d
-        end
-        mL = 1 / log(connectivity)
+    function HNSW(; connectivity=16, mL=1 / log(connectivity))
         new(
             connectivity,
-            connectivity0,
-            expansion_factor,
             mL,
-            num_layers,
+            Dict{Int,Dict{Int,Vector{Int}}}(),
             1,
             Int[],
-            graphs,
-            Dict{Int,Int}(),
         )
     end
 end
@@ -39,13 +25,7 @@ function _distance(x::Int, y::Int)::Int
 end
 
 function _get_level(hnsw::HNSW)::Int
-    l = min(floor(Int, (-log(rand()) * hnsw.mL) + 1), hnsw.num_layers)
-    if haskey(hnsw.counts, l)
-        hnsw.counts[l] += 1
-    else
-        hnsw.counts[l] = 1
-    end
-    return l
+    floor(Int, (-log(rand()) * hnsw.mL) + 1)
 end
 
 function _search_layer(hnsw::HNSW, query::Int, ep::Int, expansion_factor::Int, level::Int)::Vector{Int}
@@ -80,26 +60,28 @@ function _search_layer(hnsw::HNSW, query::Int, ep::Int, expansion_factor::Int, l
         end
     end
 
-    mx = level == 1 ? hnsw.connectivity0 : hnsw.connectivity
+    mx = hnsw.connectivity
     k = min(length(W), mx)
     sort!(W.data, by=x -> x[1])
     return Int[W.data[i][2] for i = 1:k]
 end
 
-function Base.insert!(hnsw::HNSW, q::Int)
+function Base.insert!(hnsw::HNSW, q::Int; expansion_factor::Int=128)
     push!(hnsw.data, q)
-    q_i = length(hnsw.data)
-    L = length(hnsw.graphs)
-
-    if q_i == 1
-        for level = L:-1:1
-            hnsw.graphs[level][1] = Int[]
-        end
-        return
-    end
-
+    ind = length(hnsw.data)
     ep = hnsw.enter_point
     l = _get_level(hnsw)
+    new_entry_point = l > length(hnsw.graphs)
+
+    if !haskey(hnsw.graphs, l)
+        hnsw.graphs[l] = Dict{Int,Vector{Int}}()
+        for level = l-1:-1:1
+            if !haskey(hnsw.graphs, level)
+                hnsw.graphs[level] = Dict{Int,Vector{Int}}()
+            end
+        end
+    end
+    L = length(hnsw.graphs)
 
     for level = L:-1:l+1
         W = _search_layer(hnsw, q, ep, 1, level)
@@ -107,23 +89,26 @@ function Base.insert!(hnsw::HNSW, q::Int)
     end
 
     for level = l:-1:1
-        W = _search_layer(hnsw, q, ep, hnsw.expansion_factor, level)
-        neighbors = W
-
+        neighbors = _search_layer(hnsw, q, ep, expansion_factor, level)
         # bi-directional connection
-        hnsw.graphs[level][q_i] = neighbors
+        # hnsw.graphs[level][ind] = neighbors
+        hnsw.graphs[level][ind] = Int[]
         for n in neighbors
+            if n == ind
+                continue
+            end
+            push!(hnsw.graphs[level][ind], n)
             if !haskey(hnsw.graphs[level], n)
-                hnsw.graphs[level][n] = Int[q_i]
+                hnsw.graphs[level][n] = Int[ind]
             else
-                if q_i ∉ hnsw.graphs[level][n]
-                    push!(hnsw.graphs[level][n], q_i)
+                if ind ∉ hnsw.graphs[level][n]
+                    push!(hnsw.graphs[level][n], ind)
                 end
             end
         end
 
         # shrink the neighbors if necessary
-        mx = level == 1 ? hnsw.connectivity0 : hnsw.connectivity
+        mx = hnsw.connectivity
         for n in neighbors
             if length(hnsw.graphs[level][n]) > mx
                 hnsw.graphs[level][n] = sort!(
@@ -132,18 +117,21 @@ function Base.insert!(hnsw::HNSW, q::Int)
                 )[1:mx]
             end
         end
-        ep = W[1]
+        ep = neighbors[1]
     end
 
-    hnsw.enter_point = ep
+    if new_entry_point
+        hnsw.enter_point = ep
+    end
     return
 end
 
 function search(hnsw::HNSW, query::Int, k::Int; expansion_search::Int=64)
-    @info "Searching for $k neighbors" query
     ep = hnsw.enter_point
+    @info "Searching for $k neighbors" query ep
     L = length(hnsw.graphs)
     for level = L:-1:2
+        @info "Searching level $level" ep hnsw.data[level]
         W = _search_layer(hnsw, query, ep, 1, level)
         ep = W[1]
     end
@@ -151,14 +139,17 @@ function search(hnsw::HNSW, query::Int, k::Int; expansion_search::Int=64)
     return (W, [hnsw.data[n] for n in W])
 end
 
-function run0()::HNSW
-    hnsw = HNSW(10)
-    for _ = 1:1000
-        insert!(hnsw, rand(1:10_000))
+function run0(n::Int)::HNSW
+    hnsw = HNSW(; connectivity=16)
+    rng = 1:1_000_000
+    for _ = 1:n
+        insert!(hnsw, rand(rng))
     end
+    search0(rand(rng), hnsw, 5)
+    return hnsw
+end
 
-    query = rand(1:10_000)
-    k = 5
+function search0(query::Int, hnsw::HNSW, k::Int)
     (inds, vals) = search(hnsw, query, k)
     distances = [_distance(query, data_point) for data_point in hnsw.data]
     k_nearest_manual = sortperm(distances)[1:k]
@@ -169,15 +160,13 @@ function run0()::HNSW
     println("Manual vals ", sort([hnsw.data[i] for i in k_nearest_manual]))
 
     # print length of each graph layer
-    for lc = 1:hnsw.num_layers
+    for lc = 1:length(hnsw.graphs)
         println("Layer $lc: length = $(length(hnsw.graphs[lc]))")
     end
+    return
+end
 
-    println("Counts")
-    # print the counts
-    for (k, v) in hnsw.counts
-        println("Level $k: $v")
-    end
-
-    return hnsw
+function search0(hnsw::HNSW, k::Int)
+    q = rand(1:1_000_000)
+    search0(q, hnsw, k)
 end
