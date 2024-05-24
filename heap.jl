@@ -121,7 +121,8 @@ function pop!(heap::MinHeap)::Pair{Int,Int}
     min_value = heap.data[1]
 
     # Swap the root with the last element
-    heap.data[1], heap.data[heap.current_idx-1] = heap.data[heap.current_idx-1], heap.data[1]
+    heap.data[1], heap.data[heap.current_idx-1] =
+        heap.data[heap.current_idx-1], heap.data[1]
     heap.current_idx -= 1
 
     # Heapify down from the root

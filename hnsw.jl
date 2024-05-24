@@ -9,14 +9,8 @@ mutable struct HNSW
     enter_point::Int
     data::Vector{Int}
 
-    function HNSW(; connectivity=16, mL=1 / log(connectivity))
-        new(
-            connectivity,
-            mL,
-            Dict{Int,Dict{Int,Vector{Int}}}(),
-            1,
-            Int[],
-        )
+    function HNSW(; connectivity = 16, mL = 1 / log(connectivity))
+        new(connectivity, mL, Dict{Int,Dict{Int,Vector{Int}}}(), 1, Int[])
     end
 end
 
@@ -28,10 +22,17 @@ function _get_level(hnsw::HNSW)::Int
     floor(Int, (-log(rand()) * hnsw.mL) + 1)
 end
 
-function _search_layer(hnsw::HNSW, query::Int, ep::Int, expansion_factor::Int, level::Int)::Vector{Int}
+function _search_layer(
+    hnsw::HNSW,
+    query::Int,
+    ep::Int,
+    expansion_factor::Int,
+    level::Int;
+    k::Int = 0,
+)::Vector{Int}
     visited = Set{Int}([ep])
-    candidates = MinHeap(expansion_factor * 5)
-    W = MaxHeap(expansion_factor)
+    candidates = MinHeap(expansion_factor)
+    W = MaxHeap(k > 0 ? k : expansion_factor)
 
     d = _distance(query, hnsw.data[ep])
     insert!(candidates, d => ep)
@@ -46,27 +47,28 @@ function _search_layer(hnsw::HNSW, query::Int, ep::Int, expansion_factor::Int, l
         end
 
         for e in get(hnsw.graphs[level], c, Int[])
-            if e ∉ visited
-                push!(visited, e)
-                d_e = _distance(query, hnsw.data[e])
-                d_f = W[1].first
+            if e ∈ visited
+                continue
+            end
+            push!(visited, e)
+            d_e = _distance(query, hnsw.data[e])
+            d_f = W[1].first
 
-                if d_e < d_f || length(W) < expansion_factor
-                    # insert! will automatically remove the largest element if the heap is full
-                    insert!(W, d_e => e)
-                    insert!(candidates, d_e => e)
-                end
+            if d_e < d_f || length(W) < expansion_factor
+                # insert! will automatically remove the largest element if the heap is full
+                insert!(W, d_e => e)
+                insert!(candidates, d_e => e)
             end
         end
     end
 
     mx = hnsw.connectivity
     k = min(length(W), mx)
-    sort!(W.data, by=x -> x[1])
+    sort!(W.data, by = x -> x[1])
     return Int[W.data[i][2] for i = 1:k]
 end
 
-function Base.insert!(hnsw::HNSW, q::Int; expansion_factor::Int=128)
+function Base.insert!(hnsw::HNSW, q::Int; expansion_factor::Int = 128)
     push!(hnsw.data, q)
     ind = length(hnsw.data)
     ep = hnsw.enter_point
@@ -110,10 +112,10 @@ function Base.insert!(hnsw::HNSW, q::Int; expansion_factor::Int=128)
         # shrink the neighbors if necessary
         mx = hnsw.connectivity
         for n in neighbors
-            if length(hnsw.graphs[level][n]) > mx
+            if length(hnsw.graphs[level][n]) > 2 * mx
                 hnsw.graphs[level][n] = sort!(
                     hnsw.graphs[level][n],
-                    by=x -> _distance(hnsw.data[x], hnsw.data[n]),
+                    by = x -> _distance(hnsw.data[x], hnsw.data[n]),
                 )[1:mx]
             end
         end
@@ -126,21 +128,25 @@ function Base.insert!(hnsw::HNSW, q::Int; expansion_factor::Int=128)
     return
 end
 
-function search(hnsw::HNSW, query::Int, k::Int; expansion_search::Int=64)
+function search(hnsw::HNSW, query::Int, k::Int; expansion_search::Int = 64)
     ep = hnsw.enter_point
-    @info "Searching for $k neighbors" query ep
+    # @info "Searching for $k neighbors" query ep
     L = length(hnsw.graphs)
     for level = L:-1:2
-        @info "Searching level $level" ep hnsw.data[level]
+        # @time W = _search_layer(hnsw, query, ep, 1, level)
         W = _search_layer(hnsw, query, ep, 1, level)
         ep = W[1]
     end
-    W = _search_layer(hnsw, query, ep, expansion_search, 1)[1:k]
-    return (W, [hnsw.data[n] for n in W])
+    # @time W = _search_layer(hnsw, query, ep, expansion_search, 1; k=k)
+    W = _search_layer(hnsw, query, ep, expansion_search, 1; k = k)
+    # return W
+    inds = [W[i] for i = 1:k]
+    vals = [hnsw.data[i] for i in inds]
+    return (inds, vals)
 end
 
 function run0(n::Int)::HNSW
-    hnsw = HNSW(; connectivity=16)
+    hnsw = HNSW(; connectivity = 16)
     rng = 1:1_000_000
     for _ = 1:n
         insert!(hnsw, rand(rng))
@@ -154,6 +160,7 @@ function search0(query::Int, hnsw::HNSW, k::Int)
     distances = [_distance(query, data_point) for data_point in hnsw.data]
     k_nearest_manual = sortperm(distances)[1:k]
 
+    @info "Searching for $k neighbors" query
     println("HNSW inds ", sort(inds))
     println("Manual inds ", sort(k_nearest_manual))
     println("HNSW vals ", sort(vals))
