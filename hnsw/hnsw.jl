@@ -18,7 +18,11 @@ mutable struct HNSW
     enter_point::Int
     data::Vector{SVector{8,UInt64}}
 
-    function HNSW(connectivity::Int; connectivity0::Int=connectivity * 2, mL::Float64=1 / log(connectivity))
+    function HNSW(
+        connectivity::Int;
+        connectivity0::Int = connectivity * 2,
+        mL::Float64 = 1 / log(connectivity),
+    )
         v = Vector{SVector{8,UInt64}}[]
         new(connectivity, connectivity0, mL, Dict{Int,Dict{Int,Vector{Int}}}(), 1, v)
     end
@@ -97,14 +101,19 @@ function _search_layer(
         end
     end
     # @info "" level length(visited)
-    sort!(W.data, by=x -> x[1])
+    sort!(W.data, by = x -> x[1])
     # @info "" W.data
     # println(nodes_searched)
     return Int[W.data[i][2] for i = 1:length(W)]
 end
 
 
-function Base.insert!(hnsw::HNSW, q::SVector{8,UInt64}; expansion_factor::Int=100, maximum_candidates::Int=1000)
+function Base.insert!(
+    hnsw::HNSW,
+    q::SVector{8,UInt64};
+    expansion_factor::Int = 100,
+    maximum_candidates::Int = 1000,
+)
     candidates = MinHeap(maximum_candidates)
     W = MaxHeap(expansion_factor)
     insert!(hnsw, candidates, W, q)
@@ -155,7 +164,7 @@ function Base.insert!(hnsw::HNSW, candidates::MinHeap, W::MaxHeap, q::SVector{8,
                     if length(hnsw.graphs[level][n]) > mx
                         hnsw.graphs[level][n] = sort!(
                             hnsw.graphs[level][n],
-                            by=x -> hamming_distance(hnsw.data[x], hnsw.data[n]),
+                            by = x -> hamming_distance(hnsw.data[x], hnsw.data[n]),
                         )[1:mx]
                     end
                 end
@@ -174,8 +183,13 @@ function Base.insert!(hnsw::HNSW, candidates::MinHeap, W::MaxHeap, q::SVector{8,
     return
 end
 
-function construct(n::Int; connectivity::Int=16, expansion_factor=100, maximum_candidates::Int=1000)::HNSW
-    hnsw = HNSW(connectivity; connectivity0=connectivity * 2)
+function construct(
+    n::Int;
+    connectivity::Int = 16,
+    expansion_factor = 100,
+    maximum_candidates::Int = 1000,
+)::HNSW
+    hnsw = HNSW(connectivity; connectivity0 = connectivity * 2)
     candidates = MinHeap(maximum_candidates)
     W = MaxHeap(expansion_factor)
     for _ = 1:n
@@ -189,7 +203,13 @@ function construct(n::Int; connectivity::Int=16, expansion_factor=100, maximum_c
     return hnsw
 end
 
-function search(hnsw::HNSW, query::SVector{8,UInt64}, k::Int; expansion_search::Int=30, maximum_candidates=1000)::Vector{Int}
+function search(
+    hnsw::HNSW,
+    query::SVector{8,UInt64},
+    k::Int;
+    expansion_search::Int = 30,
+    maximum_candidates = 1000,
+)::Vector{Int}
     candidates = MinHeap(maximum_candidates)
     if k > expansion_search
         expansion_search = k
@@ -210,19 +230,39 @@ function search(hnsw::HNSW, query::SVector{8,UInt64}, k::Int; expansion_search::
     return result[1:n]
 end
 
-function approx_vs_exact(hnsw, query::SVector{8,UInt64}, k::Int, expansion_search::Int, maximum_candidates::Int)
-    inds = search(hnsw, query, k; expansion_search=expansion_search, maximum_candidates=maximum_candidates)
+function approx_vs_exact(
+    hnsw,
+    query::SVector{8,UInt64},
+    k::Int,
+    expansion_search::Int,
+    maximum_candidates::Int,
+)
+    inds = search(
+        hnsw,
+        query,
+        k;
+        expansion_search = expansion_search,
+        maximum_candidates = maximum_candidates,
+    )
     approx_dists = [hamming_distance(query, hnsw.data[i]) for i in inds]
-    distances = [hamming_distance(query, hnsw.data[i]) for i in 1:length(hnsw.data)]
+    distances = [hamming_distance(query, hnsw.data[i]) for i = 1:length(hnsw.data)]
     k_nearest_manual = sortperm(distances)[1:k]
 
     println("HNSW inds ", sort(inds))
     println("Manual inds ", sort(k_nearest_manual))
     println("HNSW distances ", sort(approx_dists))
-    println("Manual distances ", sort([hamming_distance(hnsw.data[i], query) for i in k_nearest_manual]))
+    println(
+        "Manual distances ",
+        sort([hamming_distance(hnsw.data[i], query) for i in k_nearest_manual]),
+    )
 end
 
-function approx_vs_exact(hnsw::HNSW, k::Int; expansion_search::Int=30, maximum_candidates::Int=1000)
+function approx_vs_exact(
+    hnsw::HNSW,
+    k::Int;
+    expansion_search::Int = 30,
+    maximum_candidates::Int = 1000,
+)
     q = SVector{8,UInt64}(reinterpret(UInt64, rand(Int8, 64)))
     approx_vs_exact(hnsw, q, k, expansion_search, maximum_candidates)
 end
