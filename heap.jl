@@ -16,6 +16,10 @@ function Base.getindex(h::MaxHeap, inds)
     h.data[inds...]
 end
 
+function reset!(heap::MaxHeap)
+    heap.current_idx = 1
+end
+
 function Base.insert!(heap::MaxHeap, value::Pair{Int,Int})
     if heap.current_idx <= heap.k
         heap.data[heap.current_idx] = value
@@ -71,6 +75,10 @@ end
 
 function Base.getindex(h::MinHeap, inds)
     h.data[inds...]
+end
+
+function reset!(heap::MinHeap)
+    heap.current_idx = 1
 end
 
 function Base.insert!(heap::MinHeap, value::Pair{Int,Int})
