@@ -1,5 +1,7 @@
 # Approximate Search
 
+> [code](https://github.com/domluna/tinyrag/blob/main/hnsw/hnsw.jl)
+
 ## Prior Work
 
 [paper](https://arxiv.org/abs/1603.09320)
