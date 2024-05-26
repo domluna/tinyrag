@@ -169,7 +169,7 @@ Everytime a comparison is done there's 30-50ns of total work being performed whi
 
 This is a sample search
 
-```
+```julia
 julia> search(hnsw, q, 30; expansion_search=30, maximum_candidates=64)
 ┌ Info:
 │   level = 6
@@ -194,7 +194,7 @@ julia> search(hnsw, q, 30; expansion_search=30, maximum_candidates=64)
 
 Before the last layer we would be over the budget number of comparisons.
 
-```
+```julia
 julia> @be search($hnsw, $q, 30; expansion_search=30, maximum_candidates=64)
 Benchmark: 3076 samples with 1 evaluation
 min    19.083 μs (80 allocs: 54.422 KiB)
