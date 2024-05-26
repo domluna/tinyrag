@@ -105,8 +105,8 @@ function k_closest(
     k::Int;
     startind::Int = 1,
 ) where {T<:Integer,V<:AbstractVector{T}}
-    data = _k_closest(db, query, k; startind=startind)
-    return sort!(data, by=x->x.first)
+    data = _k_closest(db, query, k; startind = startind)
+    return sort!(data, by = x -> x.first)
 end
 
 function k_closest_parallel(
@@ -121,10 +121,10 @@ function k_closest_parallel(
     end
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn _k_closest(view(db, r), query, k; startind=r[1])
+        Threads.@spawn _k_closest(view(db, r), query, k; startind = r[1])
     end
     results = fetch.(tasks)
-    sort!(vcat(results...), by=x->x.first)[1:k]
+    sort!(vcat(results...), by = x -> x.first)[1:k]
 end
 
 
@@ -135,7 +135,7 @@ function _k_closest(
     startind::Int = 1,
 ) where {T<:Integer}
     heap = MaxHeap(k)
-    @inbounds for i in 1:size(db, 2)
+    @inbounds for i = 1:size(db, 2)
         d = hamming_distance(view(db, :, i), query)
         insert!(heap, d => startind + i - 1)
     end
@@ -148,8 +148,8 @@ function k_closest(
     k::Int;
     startind::Int = 1,
 ) where {T<:Integer}
-    data = _k_closest(db, query, k; startind=startind)
-    return sort!(data, by=x->x.first)
+    data = _k_closest(db, query, k; startind = startind)
+    return sort!(data, by = x -> x.first)
 end
 
 function k_closest_parallel(
@@ -164,8 +164,8 @@ function k_closest_parallel(
     end
     task_ranges = [(i:min(i + n ÷ t - 1, n)) for i = 1:n÷t:n]
     tasks = map(task_ranges) do r
-        Threads.@spawn _k_closest(view(db, :, r), query, k; startind=r[1])
+        Threads.@spawn _k_closest(view(db, :, r), query, k; startind = r[1])
     end
     results = fetch.(tasks)
-    sort!(vcat(results...), by=x->x.first)[1:k]
+    sort!(vcat(results...), by = x -> x.first)[1:k]
 end
