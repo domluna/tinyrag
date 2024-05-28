@@ -1,5 +1,7 @@
 # Approximate Search
 
+> There was a bug in the min heap implementation which caused the search to be far less exhaustive. The timings are much higher than before but the accuracy is much better.
+
 > [code](https://github.com/domluna/tinyrag/blob/main/hnsw/hnsw.jl)
 
 ## Prior Work
