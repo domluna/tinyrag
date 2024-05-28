@@ -20,37 +20,12 @@ function reset!(heap::MaxHeap)
     heap.current_idx = 1
 end
 
-function findmin(heap::MaxHeap)::Int
-    if length(heap) == 0
-        throw(ArgumentError("min-heap is empty"))
-    end
-    if length(heap) == 1
-        return 1
-    end
-
-    n = length(heap)
-    ind = div(n, 2)
-    el = heap[ind]
-
-    for i in ind+1:n
-        if heap[i].first < el.first
-            el = heap[i]
-            ind = i
-        end
-    end
-    return ind
-end
-
 function Base.insert!(heap::MaxHeap, value::Pair{Int,Int})
     if heap.current_idx <= heap.k
         heap.data[heap.current_idx] = value
         heap.current_idx += 1
         makeheap!(heap, heap.current_idx - 1) # Heapify up from the inserted position
-    else
-        ind = findmin(heap)
-        if value.first > heap.data[ind].first
-            return
-        end
+    elseif value.first < heap.data[1].first
         heap.data[1] = value
         heapify!(heap, 1) # Heapify down from the root
     end

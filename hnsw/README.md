@@ -1,7 +1,5 @@
 # Approximate Search
 
-> There was a bug in the min heap implementation which caused the search to be far less exhaustive. The timings are much higher than before but the accuracy is much better.
-
 > [code](https://github.com/domluna/tinyrag/blob/main/hnsw/hnsw.jl)
 
 ## Prior Work
@@ -196,7 +194,7 @@ julia> search(hnsw, q, 30; expansion_search=30, maximum_candidates=64)
 
 Before the last layer we would be over the budget number of comparisons.
 
-```
+```julia
 julia> @be search($hnsw, $q, 30; expansion_search=30, maximum_candidates=64)
 Benchmark: 3076 samples with 1 evaluation
 min    19.083 μs (80 allocs: 54.422 KiB)
