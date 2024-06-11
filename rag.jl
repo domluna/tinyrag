@@ -112,10 +112,10 @@ end
 function k_closest_parallel(
     db::AbstractArray{V},
     query::AbstractVector{T},
-    k::Int,
+    k::Int;
+    t::Int=nthreads(),
 ) where {T<:Integer,V<:AbstractVector{T}}
     n = length(db)
-    t = nthreads()
     if n < 10_000 || t == 1
         return k_closest(db, query, k)
     end
@@ -155,10 +155,10 @@ end
 function k_closest_parallel(
     db::AbstractMatrix{T},
     query::AbstractVector{T},
-    k::Int,
+    k::Int;
+    t::Int=nthreads(),
 ) where {T<:Integer}
     n = size(db, 2)
-    t = nthreads()
     if n < 10_000 || t == 1
         return k_closest(db, query, k)
     end
